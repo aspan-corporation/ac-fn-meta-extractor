@@ -28,6 +28,7 @@ export const handler: Handler = withMiddlewares(partialHandler).use({
     const assumeRoleCommandOutput = await stsService.assumeRole({
       RoleArn: assertEnvVar("AC_TAU_MEDIA_MEDIA_BUCKET_ACCESS_ROLE_ARN"),
       RoleSessionName: "extract-meta-data",
+      ExternalId: "ac",
     });
 
     const sourceS3Service = new S3Service({
