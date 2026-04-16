@@ -36,8 +36,8 @@ export class AcFnMetaExtractorStack extends cdk.Stack {
         memorySize: 1024,
         timeout: cdk.Duration.minutes(5),
         batchSize: 1,
-        maxReceiveCount: 2,
-        // reservedConcurrentExecutions: 10, // Removed: account doesn't have enough unreserved concurrency
+        maxReceiveCount: 3,
+        reservedConcurrentExecutions: 10,
         environment: {
           LOG_LEVEL: "INFO",
           POWERTOOLS_SERVICE_NAME: "ac-fn-meta-extractor",
@@ -54,7 +54,8 @@ export class AcFnMetaExtractorStack extends cdk.Stack {
             ssm.StringParameter.valueForStringParameter(
               this,
               "/ac/iam/media-bucket-access-role-arn"
-            )
+            ),
+          AC_PLACE_INDEX_NAME: "MyPlaceIndex"
         }
       }
     );
@@ -125,7 +126,7 @@ export class AcFnMetaExtractorStack extends cdk.Stack {
         service: "geo",
         region: this.region,
         account: this.account,
-        resource: "place-index/TauPlaceIndex"
+        resource: "place-index/MyPlaceIndex"
       },
       this
     );

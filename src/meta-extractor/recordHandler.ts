@@ -12,6 +12,7 @@ import exifrTransform from "./exifrTransform.ts";
 
 const region = assertEnvVar("AWS_REGION");
 const metaTableName = assertEnvVar("AC_TAU_MEDIA_META_TABLE_NAME");
+const placeIndexName = assertEnvVar("AC_PLACE_INDEX_NAME");
 
 export const recordHandler = async (
   record: SQSRecord,
@@ -34,6 +35,28 @@ export const recordHandler = async (
       bucket: { name: sourceBucket },
     },
   } = item as S3ObjectCreatedNotificationEvent;
+
+  const isFolder = sourceKey.endsWith("/");
+
+  if (isFolder) {
+    logger.debug("FolderMetaExtractionStarted", { sourceKey });
+    metrics.addMetric("FolderMetaExtractionsStarted", MetricUnit.Count, 1);
+
+    await processMeta({
+      dynamoDBService,
+      locationService,
+      meta: [],
+      size: 0,
+      id: sourceKey,
+      metaTableName,
+      placeIndexName,
+      logger,
+    });
+
+    logger.debug("FolderMetaExtractionFinished", { sourceKey });
+    metrics.addMetric("FolderMetaExtractionsFinished", MetricUnit.Count, 1);
+    return;
+  }
 
   logger.debug("PictureMetaExtractionsStarted", { sourceKey });
   metrics.addMetric("PictureMetaExtractionsStarted", MetricUnit.Count, 1);
@@ -60,6 +83,7 @@ export const recordHandler = async (
     size,
     id: sourceKey,
     metaTableName,
+    placeIndexName,
     logger,
   });
 
