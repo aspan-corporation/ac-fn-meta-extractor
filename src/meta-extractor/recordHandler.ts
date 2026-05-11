@@ -5,10 +5,13 @@ import {
   MetricUnit,
   processMeta,
 } from "@aspan-corporation/ac-shared";
+import { SFNClient, SendTaskSuccessCommand, SendTaskFailureCommand } from "@aws-sdk/client-sfn";
 import type { S3ObjectCreatedNotificationEvent, SQSRecord } from "aws-lambda";
 import exifr from "exifr";
 import assert from "node:assert/strict";
 import exifrTransform from "./exifrTransform.ts";
+
+const sfnClient = new SFNClient({});
 
 const region = assertEnvVar("AWS_REGION");
 const metaTableName = assertEnvVar("AC_TAU_MEDIA_META_TABLE_NAME");
@@ -28,13 +31,19 @@ export const recordHandler = async (
   const payload = record.body;
   assert(payload, "SQS record has no body");
 
-  let item: S3ObjectCreatedNotificationEvent;
+  let parsed: Record<string, unknown>;
   try {
-    item = JSON.parse(payload) as S3ObjectCreatedNotificationEvent;
+    parsed = JSON.parse(payload) as Record<string, unknown>;
   } catch (e) {
     logger.error("Failed to parse SQS record payload", { error: e });
     throw new Error(`Failed to parse SQS record payload: ${e instanceof Error ? e.message : String(e)}`);
   }
+
+  // When dispatched by the Step Functions media-processing state machine the
+  // body carries an extra `taskToken` field.  We extract it and later signal
+  // completion so the state machine can proceed to the next step.
+  const taskToken = typeof parsed.taskToken === "string" ? parsed.taskToken : undefined;
+  const item = parsed as unknown as S3ObjectCreatedNotificationEvent;
 
   const {
     detail: {
@@ -84,7 +93,21 @@ export const recordHandler = async (
 
   logger.debug("downloaded media file", { sourceBucket, sourceKey, size });
 
-  const exifrData = await exifr.parse(buffer);
+  let exifrData: Awaited<ReturnType<typeof exifr.parse>>;
+  try {
+    exifrData = await exifr.parse(buffer);
+  } catch (err) {
+    // Some HEIC variants (e.g. HDR gain-map / tmap brand from newer iPhones)
+    // are not yet supported by exifr. Write a minimal record so the file is
+    // visible in the UI rather than invisible.
+    logger.warn("ExifParseSkipped", {
+      sourceKey,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    metrics.addMetric("PictureMetaExtractionExifSkipped", MetricUnit.Count, 1);
+    exifrData = undefined;
+  }
+
   const meta = exifrTransform(exifrData);
 
   await processMeta({
@@ -101,4 +124,12 @@ export const recordHandler = async (
   logger.debug("PictureMetaExtractionsFinished", { sourceKey });
   metrics.addMetric("PictureMetaExtractionsFinished", MetricUnit.Count, 1);
 
+  if (taskToken) {
+    // Determine orientation value from the tags we just wrote
+    const orientationTag = meta.find((t) => t.key === "orientation");
+    await sfnClient.send(new SendTaskSuccessCommand({
+      taskToken,
+      output: JSON.stringify({ orientation: orientationTag?.value ?? null }),
+    }));
+  }
 };

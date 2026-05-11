@@ -148,10 +148,14 @@ export class AcFnMetaExtractorStack extends cdk.Stack {
       })
     );
 
-    // Store the queue URL in SSM Parameter Store for external access
+    // Store the queue URL and ARN in SSM for external access
     new ssm.StringParameter(this, "MetaExtractorProcessorQueueUrlParameter", {
       parameterName: "/ac/meta-extractor/queue-url",
       stringValue: metaExtractorProcessor.queue.queueUrl
+    });
+    new ssm.StringParameter(this, "MetaExtractorProcessorQueueArnParameter", {
+      parameterName: "/ac/meta-extractor/queue-arn",
+      stringValue: metaExtractorProcessor.queue.queueArn
     });
   }
 }
