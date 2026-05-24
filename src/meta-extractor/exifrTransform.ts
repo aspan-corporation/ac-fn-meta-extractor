@@ -5,7 +5,13 @@ export default function (exifrData: ExifrRawData): TagInput[] {
 
   const {
     Orientation: orientation,
-    CreateDate: dateCreated,
+    // DateTimeOriginal = when the shutter was pressed — the semantically
+    // correct "photo date". CreateDate = when the digital file was created,
+    // which may be an export or conversion date days/months later. Prefer
+    // DateTimeOriginal so that searching by year/month returns photos by
+    // when they were taken, not when they were processed.
+    DateTimeOriginal: dateTimeOriginal,
+    CreateDate: createDate,
     ExifImageWidth: width,
     ExifImageHeight: height,
     Make: make,
@@ -13,6 +19,7 @@ export default function (exifrData: ExifrRawData): TagInput[] {
     latitude,
     longitude
   } = exifrData;
+  const dateCreated = (dateTimeOriginal as unknown as Date) ?? createDate;
 
   return [
     ...(make ? [{ key: "make", value: make }] : []),
