@@ -5,7 +5,7 @@ import {
   MetricUnit,
   processMeta,
 } from "@aspan-corporation/ac-shared";
-import { SFNClient, SendTaskSuccessCommand, SendTaskFailureCommand } from "@aws-sdk/client-sfn";
+import { SFNClient, SendTaskSuccessCommand } from "@aws-sdk/client-sfn";
 import type { S3ObjectCreatedNotificationEvent, SQSRecord } from "aws-lambda";
 import exifr from "exifr";
 import assert from "node:assert/strict";
@@ -13,7 +13,6 @@ import exifrTransform from "./exifrTransform.ts";
 
 const sfnClient = new SFNClient({});
 
-const region = assertEnvVar("AWS_REGION");
 const metaTableName = assertEnvVar("AC_TAU_MEDIA_META_TABLE_NAME");
 const placeIndexName = assertEnvVar("AC_PLACE_INDEX_NAME");
 
