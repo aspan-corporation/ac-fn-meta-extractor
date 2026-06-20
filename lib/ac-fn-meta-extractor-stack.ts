@@ -55,6 +55,12 @@ export class AcFnMetaExtractorStack extends cdk.Stack {
               this,
               "/ac/iam/media-bucket-access-role-arn"
             ),
+          // In-account diary bucket holding diary-uploaded images. Read with the
+          // Lambda's own role (granted below), not the cross-account media role.
+          AC_DIARY_BUCKET_NAME: ssm.StringParameter.valueForStringParameter(
+            this,
+            "/ac/storage/diary-bucket-name"
+          ),
           AC_PLACE_INDEX_NAME: "MyPlaceIndex"
         }
       }
@@ -145,6 +151,20 @@ export class AcFnMetaExtractorStack extends cdk.Stack {
         resources: [
           `arn:aws:iam::${this.account}:role/aspan-corporation/ac-s3-media-read-access`
         ]
+      })
+    );
+
+    // Allow Lambda to read diary-uploaded source images from the in-account
+    // diary bucket (the cross-account media role can't reach it).
+    const diaryBucketArn = ssm.StringParameter.valueForStringParameter(
+      this,
+      "/ac/storage/diary-bucket-arn"
+    );
+
+    metaExtractorProcessor.processor.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:GetObject"],
+        resources: [`${diaryBucketArn}/*`]
       })
     );
 
