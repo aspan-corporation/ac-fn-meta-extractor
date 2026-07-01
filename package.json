@@ -49,7 +49,7 @@
     "typescript-eslint": "^8.47.0"
   },
   "dependencies": {
-    "@aspan-corporation/ac-shared": "^1.2.33",
+    "@aspan-corporation/ac-shared": "^1.2.36",
     "@aws-sdk/client-sfn": "^3.1045.0",
     "exifr": "^7.1.3"
   }
