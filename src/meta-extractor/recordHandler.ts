@@ -10,6 +10,7 @@ import type { S3ObjectCreatedNotificationEvent, SQSRecord } from "aws-lambda";
 import exifr from "exifr";
 import assert from "node:assert/strict";
 import exifrTransform from "./exifrTransform.ts";
+import hintFallbackTags from "./hintFallback.ts";
 
 const sfnClient = new SFNClient({});
 
@@ -126,7 +127,10 @@ export const recordHandler = async (
   // the library — useful for photos that have no EXIF date (old scans, etc.).
   // Using HeadObject rather than the EventBridge timestamp because ac-commander
   // synthetic SQS messages don't carry an event timestamp.
+  // The same HeadObject response carries the device hints (x-amz-meta-hint-*)
+  // set by the diary upload flow, used as fallback where EXIF came up empty.
   const importTags: Array<{ key: string; value: string }> = [];
+  const hintTags: Array<{ key: string; value: string }> = [];
   try {
     const head = await readS3Service.headObject({ Bucket: sourceBucket, Key: sourceKey });
     if (head.LastModified) {
@@ -134,6 +138,13 @@ export const recordHandler = async (
         { key: "yearImported", value: String(head.LastModified.getUTCFullYear()) },
         { key: "monthImported", value: String(head.LastModified.getUTCMonth() + 1) },
       );
+    }
+    hintTags.push(...hintFallbackTags(meta, head.Metadata));
+    if (hintTags.length > 0) {
+      logger.debug("DeviceHintFallbackApplied", {
+        sourceKey,
+        keys: hintTags.map((t) => t.key),
+      });
     }
   } catch (err) {
     logger.warn("HeadObjectFailed — import tags will be skipped", {
@@ -145,7 +156,7 @@ export const recordHandler = async (
   await processMeta({
     dynamoDBService,
     locationService,
-    meta: [...meta, ...importTags],
+    meta: [...meta, ...hintTags, ...importTags],
     size,
     id: sourceKey,
     metaTableName,
