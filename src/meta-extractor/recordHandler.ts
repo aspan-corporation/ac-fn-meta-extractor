@@ -1,6 +1,7 @@
 import {
   AcContext,
   assertEnvVar,
+  hintFallbackTags,
   isAllowedExtension,
   MetricUnit,
   processMeta,
@@ -10,7 +11,6 @@ import type { S3ObjectCreatedNotificationEvent, SQSRecord } from "aws-lambda";
 import exifr from "exifr";
 import assert from "node:assert/strict";
 import exifrTransform from "./exifrTransform.ts";
-import hintFallbackTags from "./hintFallback.ts";
 
 const sfnClient = new SFNClient({});
 
@@ -27,7 +27,8 @@ export const recordHandler = async (
 ): Promise<void> => {
   const { logger, metrics, acServices = {} } = context;
 
-  const { dynamoDBService, locationService, sourceS3Service, localS3Service } = acServices;
+  const { dynamoDBService, locationService, sourceS3Service, localS3Service } =
+    acServices;
   assert(dynamoDBService, "dynamoDBService is required in acServices");
   assert(locationService, "locationService is required in acServices");
   assert(sourceS3Service, "sourceS3Service is required in acServices");
@@ -40,13 +41,16 @@ export const recordHandler = async (
     parsed = JSON.parse(payload) as Record<string, unknown>;
   } catch (e) {
     logger.error("Failed to parse SQS record payload", { error: e });
-    throw new Error(`Failed to parse SQS record payload: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(
+      `Failed to parse SQS record payload: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   // When dispatched by the Step Functions media-processing state machine the
   // body carries an extra `taskToken` field.  We extract it and later signal
   // completion so the state machine can proceed to the next step.
-  const taskToken = typeof parsed.taskToken === "string" ? parsed.taskToken : undefined;
+  const taskToken =
+    typeof parsed.taskToken === "string" ? parsed.taskToken : undefined;
   const item = parsed as unknown as S3ObjectCreatedNotificationEvent;
 
   const {
@@ -57,7 +61,10 @@ export const recordHandler = async (
   } = item;
 
   assert(sourceKey, "detail.object.key is missing from event payload");
-  assert(size !== undefined && size !== null, "detail.object.size is missing from event payload");
+  assert(
+    size !== undefined && size !== null,
+    "detail.object.size is missing from event payload",
+  );
   assert(sourceBucket, "detail.bucket.name is missing from event payload");
 
   const isFolder = sourceKey.endsWith("/");
@@ -95,7 +102,7 @@ export const recordHandler = async (
   // bucket reached via the assumed read-access role.
   const readS3Service =
     diaryBucketName && sourceBucket === diaryBucketName
-      ? localS3Service ?? sourceS3Service
+      ? (localS3Service ?? sourceS3Service)
       : sourceS3Service;
 
   const buffer = await readS3Service.getObject({
@@ -132,11 +139,20 @@ export const recordHandler = async (
   const importTags: Array<{ key: string; value: string }> = [];
   const hintTags: Array<{ key: string; value: string }> = [];
   try {
-    const head = await readS3Service.headObject({ Bucket: sourceBucket, Key: sourceKey });
+    const head = await readS3Service.headObject({
+      Bucket: sourceBucket,
+      Key: sourceKey,
+    });
     if (head.LastModified) {
       importTags.push(
-        { key: "yearImported", value: String(head.LastModified.getUTCFullYear()) },
-        { key: "monthImported", value: String(head.LastModified.getUTCMonth() + 1) },
+        {
+          key: "yearImported",
+          value: String(head.LastModified.getUTCFullYear()),
+        },
+        {
+          key: "monthImported",
+          value: String(head.LastModified.getUTCMonth() + 1),
+        },
       );
     }
     hintTags.push(...hintFallbackTags(meta, head.Metadata));
@@ -170,9 +186,11 @@ export const recordHandler = async (
   if (taskToken) {
     // Determine orientation value from the tags we just wrote
     const orientationTag = meta.find((t) => t.key === "orientation");
-    await sfnClient.send(new SendTaskSuccessCommand({
-      taskToken,
-      output: JSON.stringify({ orientation: orientationTag?.value ?? null }),
-    }));
+    await sfnClient.send(
+      new SendTaskSuccessCommand({
+        taskToken,
+        output: JSON.stringify({ orientation: orientationTag?.value ?? null }),
+      }),
+    );
   }
 };
