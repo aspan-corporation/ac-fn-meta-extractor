@@ -2,6 +2,7 @@ import {
   AcContext,
   assertEnvVar,
   hintFallbackTags,
+  isAllowedAudioExtension,
   isAllowedExtension,
   MetricUnit,
   processMeta,
@@ -89,14 +90,6 @@ export const recordHandler = async (
     return;
   }
 
-  logger.debug("PictureMetaExtractionsStarted", { sourceKey });
-  metrics.addMetric("PictureMetaExtractionsStarted", MetricUnit.Count, 1);
-
-  assert(
-    isAllowedExtension(sourceKey),
-    `extension for ${sourceKey} is not supported`,
-  );
-
   // Pick the read client by source bucket: the diary bucket lives in this
   // account (Lambda's own role); everything else is the cross-account media
   // bucket reached via the assumed read-access role.
@@ -104,6 +97,90 @@ export const recordHandler = async (
     diaryBucketName && sourceBucket === diaryBucketName
       ? (localS3Service ?? sourceS3Service)
       : sourceS3Service;
+
+  // Audio recordings (diary voice memos) carry nothing to decode — no EXIF, no
+  // embedded metadata. Their date/location come entirely from the device hints
+  // the browser attached at upload (mobile OSes strip metadata from files handed
+  // to a web page). Give them a searchable meta item from those hints, skipping
+  // the image download+decode path entirely.
+  if (isAllowedAudioExtension(sourceKey)) {
+    logger.debug("AudioMetaExtractionStarted", { sourceKey });
+    metrics.addMetric("AudioMetaExtractionsStarted", MetricUnit.Count, 1);
+
+    const audioMeta: Array<{ key: string; value: string }> = [];
+    try {
+      const head = await readS3Service.headObject({
+        Bucket: sourceBucket,
+        Key: sourceKey,
+      });
+      // Device hints (date + GPS) — the only metadata source for a voice memo.
+      audioMeta.push(...hintFallbackTags([], head.Metadata));
+      // No date hint? Fall back to the object's own timestamp: a diary recording
+      // is created at upload time, so LastModified ≈ when it was recorded. Keeps
+      // every recording dated (and thus in date/All/Audio search), including the
+      // brief window of recordings uploaded before device-hints shipped.
+      if (
+        !audioMeta.some((t) => t.key === "dateCreated") &&
+        head.LastModified
+      ) {
+        audioMeta.push({
+          key: "dateCreated",
+          value: head.LastModified.toISOString(),
+        });
+      }
+      if (head.LastModified) {
+        audioMeta.push(
+          {
+            key: "yearImported",
+            value: String(head.LastModified.getUTCFullYear()),
+          },
+          {
+            key: "monthImported",
+            value: String(head.LastModified.getUTCMonth() + 1),
+          },
+        );
+      }
+    } catch (err) {
+      logger.warn("HeadObjectFailed — audio meta will be minimal", {
+        sourceKey,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // processMeta derives year/month/day from dateCreated and reverse-geocodes
+    // latitude/longitude into country/region, exactly as for a photo.
+    await processMeta({
+      dynamoDBService,
+      locationService,
+      meta: audioMeta,
+      size,
+      id: sourceKey,
+      metaTableName,
+      placeIndexName,
+      logger,
+    });
+
+    logger.debug("AudioMetaExtractionFinished", { sourceKey });
+    metrics.addMetric("AudioMetaExtractionsFinished", MetricUnit.Count, 1);
+
+    if (taskToken) {
+      await sfnClient.send(
+        new SendTaskSuccessCommand({
+          taskToken,
+          output: JSON.stringify({ audio: true }),
+        }),
+      );
+    }
+    return;
+  }
+
+  logger.debug("PictureMetaExtractionsStarted", { sourceKey });
+  metrics.addMetric("PictureMetaExtractionsStarted", MetricUnit.Count, 1);
+
+  assert(
+    isAllowedExtension(sourceKey),
+    `extension for ${sourceKey} is not supported`,
+  );
 
   const buffer = await readS3Service.getObject({
     Bucket: sourceBucket,
