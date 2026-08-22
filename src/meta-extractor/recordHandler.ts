@@ -17,10 +17,6 @@ const sfnClient = new SFNClient({});
 
 const metaTableName = assertEnvVar("AC_TAU_MEDIA_META_TABLE_NAME");
 const placeIndexName = assertEnvVar("AC_PLACE_INDEX_NAME");
-// In-account bucket holding diary-uploaded images. When the event names this
-// bucket the source must be read with the Lambda's own role, not the
-// cross-account media read-access role.
-const diaryBucketName = process.env.AC_DIARY_BUCKET_NAME;
 
 export const recordHandler = async (
   record: SQSRecord,
@@ -28,8 +24,7 @@ export const recordHandler = async (
 ): Promise<void> => {
   const { logger, metrics, acServices = {} } = context;
 
-  const { dynamoDBService, locationService, sourceS3Service, localS3Service } =
-    acServices;
+  const { dynamoDBService, locationService, sourceS3Service } = acServices;
   assert(dynamoDBService, "dynamoDBService is required in acServices");
   assert(locationService, "locationService is required in acServices");
   assert(sourceS3Service, "sourceS3Service is required in acServices");
@@ -90,14 +85,6 @@ export const recordHandler = async (
     return;
   }
 
-  // Pick the read client by source bucket: the diary bucket lives in this
-  // account (Lambda's own role); everything else is the cross-account media
-  // bucket reached via the assumed read-access role.
-  const readS3Service =
-    diaryBucketName && sourceBucket === diaryBucketName
-      ? (localS3Service ?? sourceS3Service)
-      : sourceS3Service;
-
   // Audio recordings (diary voice memos) carry nothing to decode — no EXIF, no
   // embedded metadata. Their date/location come entirely from the device hints
   // the browser attached at upload (mobile OSes strip metadata from files handed
@@ -109,7 +96,7 @@ export const recordHandler = async (
 
     const audioMeta: Array<{ key: string; value: string }> = [];
     try {
-      const head = await readS3Service.headObject({
+      const head = await sourceS3Service.headObject({
         Bucket: sourceBucket,
         Key: sourceKey,
       });
@@ -182,7 +169,7 @@ export const recordHandler = async (
     `extension for ${sourceKey} is not supported`,
   );
 
-  const buffer = await readS3Service.getObject({
+  const buffer = await sourceS3Service.getObject({
     Bucket: sourceBucket,
     Key: sourceKey,
   });
@@ -216,7 +203,7 @@ export const recordHandler = async (
   const importTags: Array<{ key: string; value: string }> = [];
   const hintTags: Array<{ key: string; value: string }> = [];
   try {
-    const head = await readS3Service.headObject({
+    const head = await sourceS3Service.headObject({
       Bucket: sourceBucket,
       Key: sourceKey,
     });
